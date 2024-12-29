@@ -161,7 +161,8 @@ async function monitorPortfolio() {
     writeFileSync('portfolio.html', resultHtml);
 
     // Открытие HTML файла в браузере
-    await open('file:///C:/Users/User/my-project/portfolio.html', { app: { name: 'chrome' } });
+    await open('file:///C:/Users/User/my-project/portfolio.html', { app: { name: 'C:/Program Files/Google/Chrome/Application/chrome.exe' } });
+
 
     // Отправка данных о балансе в Telegram
     let telegramMessage = 'Portfolio Balances:\n';
