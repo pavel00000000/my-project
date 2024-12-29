@@ -1,12 +1,15 @@
 import axios from 'axios';
 import { writeFileSync } from 'fs';
 import open from 'open';
+import path from 'path';
 
+// Константы для API
 const API_KEY = 'f25c73c9-5808-4e99-99fe-8553a9650c5c';
 const encodedKey = Buffer.from(API_KEY).toString('base64');
 const telegramBotToken = '7994007891:AAGpWidV5nMzpIPBhNEfx-xaR0cY1qwQRtc';
 const TelegramChatId = '-1002322975978';
 
+// GraphQL запрос
 const query = `
   query providerPorfolioQuery($addresses: [Address!]!, $networks: [Network!]!) {
     portfolio(addresses: $addresses, networks: $networks) {
@@ -26,6 +29,7 @@ const query = `
   }
 `;
 
+// Функция для получения данных портфеля
 async function fetchPortfolio() {
   try {
     const response = await axios({
@@ -127,9 +131,9 @@ function generateHTML(data) {
   return html;
 }
 
+// Функция для отправки сообщения в Telegram
 async function sendTelegramMessage(message) {
   try {
-    // Разделяем сообщение на части, если оно слишком длинное
     const maxMessageLength = 4000; // Максимальная длина сообщения Telegram
     while (message.length > maxMessageLength) {
       const part = message.substring(0, maxMessageLength);
@@ -139,7 +143,7 @@ async function sendTelegramMessage(message) {
       });
       message = message.substring(maxMessageLength);
     }
-    // Отправляем оставшуюся часть
+    // Отправка оставшейся части
     await axios.post(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
       chat_id: TelegramChatId,
       text: message,
@@ -152,24 +156,29 @@ async function sendTelegramMessage(message) {
   }
 }
 
+// Основная функция мониторинга портфеля
 async function monitorPortfolio() {
   try {
+    // Получаем данные о портфеле
     const portfolio = await fetchPortfolio();
     const resultHtml = generateHTML(portfolio);
 
-    // Сохранение в файл portfolio.html
-    writeFileSync('portfolio.html', resultHtml);
+    // Сохранение в файл portfolio.html в текущей папке
+    const filePath = path.join(__dirname, 'portfolio.html');
+    writeFileSync(filePath, resultHtml);
 
-    // Открытие HTML файла в браузере
-    await open('file:///C:/Users/User/my-project/portfolio.html', { app: { name: 'C:/Program Files/Google/Chrome/Application/chrome.exe' } });
+    // Генерация URL и открытие файла с помощью системного браузера
+    const fileUrl = `file://${filePath}`;
+    await open(fileUrl);
+    console.log('Portfolio file opened in default browser.');
 
-
-    // Отправка данных о балансе в Telegram
+    // Формирование сообщения для Telegram
     let telegramMessage = 'Portfolio Balances:\n';
     portfolio.portfolio.tokenBalances.forEach(item => {
       telegramMessage += `${item.token.baseToken.name} (${item.token.baseToken.symbol}): ${item.token.balance} - $${item.token.balanceUSD}\n`;
     });
 
+    // Отправка данных в Telegram
     await sendTelegramMessage(telegramMessage);
   } catch (error) {
     console.error('Failed to fetch portfolio:', error.message);
@@ -179,5 +188,5 @@ async function monitorPortfolio() {
 // Запуск мониторинга каждые 5 минут
 setInterval(monitorPortfolio, 5 * 60 * 1000); // каждые 5 минут
 
-// Запуск приложения сразу
+// Запуск мониторинга сразу
 monitorPortfolio();
