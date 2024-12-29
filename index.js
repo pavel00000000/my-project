@@ -33,6 +33,9 @@ const query = `
   }
 `;
 
+// Храним баланс для расчета изменений
+let previousBalances = {};
+
 // Функция для получения данных портфеля
 async function fetchPortfolio() {
   try {
@@ -46,7 +49,7 @@ async function fetchPortfolio() {
       data: {
         query,
         variables: {
-          addresses: ['0xf977814e90da44bfa03b6295a0616a897441acec'],
+          addresses: ['0x86640F7Ff8c2e1264231701Aa7558951c2f167e8'],
           networks: ['ETHEREUM_MAINNET'],
         },
       },
@@ -98,16 +101,16 @@ function generateHTML(data) {
       </style>
     </head>
     <body>
-      <h1>Portfolio Details</h1>
+      <h1>Детали портфеля</h1>
       <table>
         <thead>
           <tr>
-            <th>Address</th>
-            <th>Network</th>
-            <th>Token Name</th>
-            <th>Token Symbol</th>
-            <th>Balance</th>
-            <th>Balance (USD)</th>
+            <th>Адрес</th>
+            <th>Сеть</th>
+            <th>Название токена</th>
+            <th>Символ токена</th>
+            <th>Баланс</th>
+            <th>Баланс (USD)</th>
           </tr>
         </thead>
         <tbody>`;
@@ -120,8 +123,8 @@ function generateHTML(data) {
         <td>${item.network}</td>
         <td>${item.token.baseToken.name}</td>
         <td>${item.token.baseToken.symbol}</td>
-        <td>${item.token.balance}</td>
-        <td>${item.token.balanceUSD}</td>
+        <td>${(item.token.balance).toFixed(1)}</td>
+        <td>${(item.token.balanceUSD).toFixed(1)}</td>
       </tr>
     `;
   });
@@ -160,6 +163,12 @@ async function sendTelegramMessage(message) {
   }
 }
 
+// Функция для расчета изменения баланса
+function calculateBalanceChange(currentBalance, previousBalance) {
+  if (previousBalance === undefined) return 0;
+  return ((currentBalance - previousBalance) / previousBalance) * 100;
+}
+
 // Основная функция мониторинга портфеля
 async function monitorPortfolio() {
   try {
@@ -174,18 +183,37 @@ async function monitorPortfolio() {
     // Генерация URL и открытие файла с помощью системного браузера
     const fileUrl = `file://${filePath}`;
     await open(fileUrl);
-    console.log('Portfolio file opened in default browser.');
+    console.log('Файл портфеля открыт в браузере.');
 
     // Формирование сообщения для Telegram
-    let telegramMessage = 'Portfolio Balances:\n';
+    let telegramMessage = 'Баланс портфеля:\n';
+
     portfolio.portfolio.tokenBalances.forEach(item => {
-      telegramMessage += `${item.token.baseToken.name} (${item.token.baseToken.symbol}): ${item.token.balance} - $${item.token.balanceUSD}\n`;
+      // Считаем изменение баланса токена
+      const tokenName = item.token.baseToken.name;
+      const tokenSymbol = item.token.baseToken.symbol;
+      const currentBalance = item.token.balance;
+      const currentBalanceUSD = item.token.balanceUSD.toFixed(1);
+      const previousBalance = previousBalances[tokenName]?.balance || 0;
+
+      // Расчет процентного изменения
+      const balanceChange = calculateBalanceChange(currentBalance, previousBalance);
+
+      telegramMessage += `${tokenName} (${tokenSymbol}): ${currentBalance.toFixed(1)} - $${currentBalanceUSD} `;
+      if (previousBalance !== 0) {
+        telegramMessage += `(${balanceChange.toFixed(2)}%)\n`;
+      } else {
+        telegramMessage += `(Новый токен)\n`;
+      }
+
+      // Сохраняем текущий баланс для следующего мониторинга
+      previousBalances[tokenName] = { balance: currentBalance };
     });
 
     // Отправка данных в Telegram
     await sendTelegramMessage(telegramMessage);
   } catch (error) {
-    console.error('Failed to fetch portfolio:', error.message);
+    console.error('Не удалось получить данные портфеля:', error.message);
   }
 }
 
@@ -205,5 +233,5 @@ app.get('/', (req, res) => {
 
 // Запуск сервера на указанном порту
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+  console.log(`Приложение запущено на порту ${port}`);
 });
