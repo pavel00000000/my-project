@@ -2,6 +2,10 @@ import axios from 'axios';
 import { writeFileSync } from 'fs';
 import open from 'open';
 import path from 'path';
+import express from 'express';
+
+// Создаем Express приложение
+const app = express();
 
 // Константы для API
 const API_KEY = 'f25c73c9-5808-4e99-99fe-8553a9650c5c';
@@ -164,7 +168,7 @@ async function monitorPortfolio() {
     const resultHtml = generateHTML(portfolio);
 
     // Сохранение в файл portfolio.html в текущей папке
-    const filePath = path.join(__dirname, 'portfolio.html');
+    const filePath = path.join(process.cwd(), 'portfolio.html');
     writeFileSync(filePath, resultHtml);
 
     // Генерация URL и открытие файла с помощью системного браузера
@@ -190,3 +194,16 @@ setInterval(monitorPortfolio, 5 * 60 * 1000); // каждые 5 минут
 
 // Запуск мониторинга сразу
 monitorPortfolio();
+
+// Устанавливаем порт для сервера, который будет использоваться на Render
+const port = process.env.PORT || 4000;
+
+// Настройка роута
+app.get('/', (req, res) => {
+  res.send('Hello World!');
+});
+
+// Запуск сервера на указанном порту
+app.listen(port, () => {
+  console.log(`Example app listening on port ${port}`);
+});
