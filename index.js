@@ -1,19 +1,12 @@
 import axios from 'axios';
-import { writeFileSync } from 'fs';
-import open from 'open';
-import path from 'path';
-import express from 'express';
 
-// Создаем Express приложение
-const app = express();
-
-// Константы для API
 const API_KEY = 'f25c73c9-5808-4e99-99fe-8553a9650c5c';
 const encodedKey = Buffer.from(API_KEY).toString('base64');
-const telegramBotToken = '7994007891:AAGpWidV5nMzpIPBhNEfx-xaR0cY1qwQRtc';
+
+// Ваши данные для Telegram бота
+const TelegramBotToken = '7994007891:AAGpWidV5nMzpIPBhNEfx-xaR0cY1qwQRtc';
 const TelegramChatId = '-1002322975978';
 
-// GraphQL запрос
 const query = `
   query providerPorfolioQuery($addresses: [Address!]!, $networks: [Network!]!) {
     portfolio(addresses: $addresses, networks: $networks) {
@@ -33,11 +26,19 @@ const query = `
   }
 `;
 
-// Храним баланс для расчета изменений
-let previousBalances = {};
+// Сопоставление адресов с именами кошельков
+const walletNames = {
+  '9hgPjBuWp28Zy8H9Kx1Dj7GtSTP4JNhhCjnA7qva3KYQ': 'К1',
+  '8PSHkoEHyYx3zx5fCBoRXwDkrGzCGkerhgP6Q3o1JJow': 'К2',
+  '7odtY8kEfmARXjS3wuMiDNNrKf3NKrhgLNCMCbkGhFS7': 'К3',
+  '3jgub3P9KP3XA9Dwh7XpKu35BiQNTZZXbPmfBAJMsroL': 'К4'
+};
 
-// Функция для получения данных портфеля
-async function fetchPortfolio() {
+// Хранение предыдущих балансов
+const previousBalances = {};
+
+// Функция для проверки и отправки уведомлений о пополнении/снятии
+async function checkForBalanceChanges() {
   try {
     const response = await axios({
       url: 'https://public.zapper.xyz/graphql',
@@ -49,189 +50,76 @@ async function fetchPortfolio() {
       data: {
         query,
         variables: {
-          addresses: ['0x86640F7Ff8c2e1264231701Aa7558951c2f167e8'],
-          networks: ['ETHEREUM_MAINNET'],
+          addresses: Object.keys(walletNames), // Все адреса из walletNames
+          networks: ['SOLANA_MAINNET'], // Используем Solana как сеть
         },
       },
     });
+
+    console.log('API Response:', JSON.stringify(response.data, null, 2)); // Логируем полный ответ
 
     if (response.data.errors) {
       throw new Error(`GraphQL Errors: ${JSON.stringify(response.data.errors)}`);
     }
 
-    return response.data.data;
+    const smzaiTokens = response.data.data.portfolio.tokenBalances.filter(balance =>
+      balance.token.baseToken.symbol === 'SMZAI'
+    );
+
+    console.log('Filtered SMZAI Tokens:', smzaiTokens); // Логируем отфильтрованные токены
+
+    let changesDetected = false; // Переменная для отслеживания изменений
+
+    smzaiTokens.forEach(token => {
+      const walletName = walletNames[token.address] || token.address; // Используем имя кошелька или сам адрес
+      const currentBalance = token.token.balance;
+
+      // Проверка на изменение баланса
+      if (previousBalances[token.address] !== currentBalance) {
+        const balanceChange = previousBalances[token.address] ? currentBalance - previousBalances[token.address] : currentBalance;
+        const changeMessage = balanceChange > 0 ? `Пополнение на ${balanceChange}` : `Снятие на ${Math.abs(balanceChange)}`;
+
+        let message = `Изменение на кошельке ${walletName}:\n`;
+        message += `Баланс: ${currentBalance} ${token.token.baseToken.symbol}\n`;
+        message += `Баланс в USD: $${token.token.balanceUSD}\n`;
+        message += `${changeMessage}\n\n`;
+
+        // Отправка уведомления в Telegram
+        sendTelegramMessage(message);
+        changesDetected = true; // Отметим, что изменения были
+      }
+
+      // Обновляем предыдущий баланс
+      previousBalances[token.address] = currentBalance;
+    });
+
+    // Если изменений не было, отправляем уведомление
+    if (!changesDetected) {
+      sendTelegramMessage('Все в порядке, изменений на кошельках не обнаружено.');
+    }
+
   } catch (error) {
-    console.error('Error fetching portfolio:', error.message);
+    console.error('Error checking balance changes:', error.message);
     if (error.response) {
       console.error('Response data:', error.response.data);
     }
-    throw error;
   }
-}
-
-// Преобразование данных в HTML
-function generateHTML(data) {
-  let html = `
-  <html>
-    <head>
-      <title>Portfolio</title>
-      <style>
-        body {
-          font-family: Arial, sans-serif;
-          margin: 20px;
-          background-color: #f4f4f9;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin: 20px 0;
-        }
-        th, td {
-          padding: 10px;
-          text-align: left;
-          border-bottom: 1px solid #ddd;
-        }
-        th {
-          background-color: #4CAF50;
-          color: white;
-        }
-        tr:hover {
-          background-color: #f5f5f5;
-        }
-      </style>
-    </head>
-    <body>
-      <h1>Детали портфеля</h1>
-      <table>
-        <thead>
-          <tr>
-            <th>Адрес</th>
-            <th>Сеть</th>
-            <th>Название токена</th>
-            <th>Символ токена</th>
-            <th>Баланс</th>
-            <th>Баланс (USD)</th>
-          </tr>
-        </thead>
-        <tbody>`;
-
-  // Заполняем таблицу данными
-  data.portfolio.tokenBalances.forEach(item => {
-    html += `
-      <tr>
-        <td>${item.address}</td>
-        <td>${item.network}</td>
-        <td>${item.token.baseToken.name}</td>
-        <td>${item.token.baseToken.symbol}</td>
-        <td>${(item.token.balance).toFixed(1)}</td>
-        <td>${(item.token.balanceUSD).toFixed(1)}</td>
-      </tr>
-    `;
-  });
-
-  html += `
-        </tbody>
-      </table>
-    </body>
-  </html>`;
-
-  return html;
 }
 
 // Функция для отправки сообщения в Telegram
 async function sendTelegramMessage(message) {
   try {
-    const maxMessageLength = 4000; // Максимальная длина сообщения Telegram
-    while (message.length > maxMessageLength) {
-      const part = message.substring(0, maxMessageLength);
-      await axios.post(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-        chat_id: TelegramChatId,
-        text: part,
-      });
-      message = message.substring(maxMessageLength);
-    }
-    // Отправка оставшейся части
-    await axios.post(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+    const response = await axios.post(`https://api.telegram.org/bot${TelegramBotToken}/sendMessage`, {
       chat_id: TelegramChatId,
       text: message,
     });
+    console.log('Message sent to Telegram:', response.data); // Логируем успешную отправку
   } catch (error) {
-    console.error('Error sending message to Telegram:', error.message);
-    if (error.response) {
-      console.error('Response data:', error.response.data);
-    }
+    console.error('Error sending Telegram message:', error.message);
   }
 }
+// Функция для периодической проверки баланса (каждые 10 минут)
+setInterval(checkForBalanceChanges, 10 * 60 * 1000); // Проверка каждые 10 минут
 
-// Функция для расчета изменения баланса
-function calculateBalanceChange(currentBalance, previousBalance) {
-  if (previousBalance === undefined) return 0;
-  return ((currentBalance - previousBalance) / previousBalance) * 100;
-}
-
-// Основная функция мониторинга портфеля
-async function monitorPortfolio() {
-  try {
-    // Получаем данные о портфеле
-    const portfolio = await fetchPortfolio();
-    const resultHtml = generateHTML(portfolio);
-
-    // Сохранение в файл portfolio.html в текущей папке
-    const filePath = path.join(process.cwd(), 'portfolio.html');
-    writeFileSync(filePath, resultHtml);
-
-    // Генерация URL и открытие файла с помощью системного браузера
-    const fileUrl = `file://${filePath}`;
-    await open(fileUrl);
-    console.log('Файл портфеля открыт в браузере.');
-
-    // Формирование сообщения для Telegram
-    let telegramMessage = 'Баланс портфеля:\n';
-
-    portfolio.portfolio.tokenBalances.forEach(item => {
-      // Считаем изменение баланса токена
-      const tokenName = item.token.baseToken.name;
-      const tokenSymbol = item.token.baseToken.symbol;
-      const currentBalance = item.token.balance;
-      const currentBalanceUSD = item.token.balanceUSD.toFixed(1);
-      const previousBalance = previousBalances[tokenName]?.balance || 0;
-
-      // Расчет процентного изменения
-      const balanceChange = calculateBalanceChange(currentBalance, previousBalance);
-
-      telegramMessage += `${tokenName} (${tokenSymbol}): ${currentBalance.toFixed(1)} - $${currentBalanceUSD} `;
-      if (previousBalance !== 0) {
-        telegramMessage += `(${balanceChange.toFixed(2)}%)\n`;
-      } else {
-        telegramMessage += `(Новый токен)\n`;
-      }
-
-      // Сохраняем текущий баланс для следующего мониторинга
-      previousBalances[tokenName] = { balance: currentBalance };
-    });
-
-    // Отправка данных в Telegram
-    await sendTelegramMessage(telegramMessage);
-  } catch (error) {
-    console.error('Не удалось получить данные портфеля:', error.message);
-  }
-}
-
-// Запуск мониторинга каждые 5 минут
-setInterval(monitorPortfolio, 5 * 60 * 1000); // каждые 5 минут
-
-// Запуск мониторинга сразу
-monitorPortfolio();
-
-// Устанавливаем порт для сервера, который будет использоваться на Render
-const port = process.env.PORT || 4000;
-
-// Настройка роута
-app.get('/', (req, res) => {
-  res.send('Hello World!');
-});
-
-// Запуск сервера на указанном порту
-app.listen(port, () => {
-  console.log(`Приложение запущено на порту ${port}`);
-});
+// Включение начальной проверки сразу при запуске
+checkForBalanceChanges();
